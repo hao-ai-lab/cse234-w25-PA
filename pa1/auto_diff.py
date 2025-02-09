@@ -27,11 +27,11 @@ class Node:
     name: str
 
     def __init__(
-        self, inputs: List["Node"], op: "Op", attrs: Dict[str, Any] = {}, name: str = ""
+        self, inputs: List["Node"], op: "Op", attrs: Dict[str, Any] = None, name: str = ""
     ) -> None:
         self.inputs = inputs
         self.op = op
-        self.attrs = attrs
+        self.attrs = {} if attrs is None else attrs
         self.name = name
 
     def __add__(self, other):
