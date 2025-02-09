@@ -175,10 +175,11 @@ def sgd_epoch(
 
         
         # Update weights and biases
-        for j in range(len(model_weights)):
-            grad_shape = grads[j].shape if grads[j] is not None else None
-            # print(f"  Weight {j} grad shape: {grad_shape}")
-            model_weights[j] = (model_weights[j].detach() - lr * grads[j].sum(dim=0)).requires_grad_()
+        with torch.no_grad():
+            for j in range(len(model_weights)):
+                # grad_shape = grads[j].shape if grads[j] is not None else None
+                # # print(f"  Weight {j} grad shape: {grad_shape}")
+                model_weights[j] = (model_weights[j].detach() - lr * grads[j].sum(dim=0)).requires_grad_()
         # Hint: You can update the tensor using something like below:
         # W_Q -= lr * grad_W_Q.sum(dim=0)
 
@@ -379,16 +380,16 @@ def train_model():
     # Train the model.
     X_train, X_test, y_train, y_test= torch.tensor(X_train), torch.tensor(X_test), torch.DoubleTensor(y_train), torch.DoubleTensor(y_test)
     model_weights: List[torch.Tensor] = [
-        torch.tensor(W_Q_val, requires_grad=True),
-        torch.tensor(W_K_val, requires_grad=True),
-        torch.tensor(W_V_val, requires_grad=True),
-        torch.tensor(W_O_val, requires_grad=True),
-        torch.tensor(W_1_val, requires_grad=True),
-        torch.tensor(W_2_val, requires_grad=True),
-        torch.tensor(b_1_val, requires_grad=True),
-        torch.tensor(b_2_val, requires_grad=True),
-        torch.tensor(W_output_val, requires_grad=True),
-        torch.tensor(b_output_val, requires_grad=True),
+        torch.tensor(W_Q_val,  dtype=torch.float64),
+        torch.tensor(W_K_val,  dtype=torch.float64),
+        torch.tensor(W_V_val,  dtype=torch.float64),
+        torch.tensor(W_O_val,  dtype=torch.float64),
+        torch.tensor(W_1_val,  dtype=torch.float64),
+        torch.tensor(W_2_val,  dtype=torch.float64),
+        torch.tensor(b_1_val,  dtype=torch.float64),
+        torch.tensor(b_2_val,  dtype=torch.float64),
+        torch.tensor(W_output_val,  dtype=torch.float64),
+        torch.tensor(b_output_val,  dtype=torch.float64),
     ]
 
 
