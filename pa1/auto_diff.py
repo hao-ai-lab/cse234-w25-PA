@@ -929,9 +929,12 @@ class MeanOp(Op):
         return torch.mean(input_values[0], dim=node.attrs["dim"], keepdim=node.attrs["keepdim"])
 
     def gradient(self, node: Node, output_grad: Node) -> List[Node]:
-        # 注意：这里给出的梯度实现较为简单，仅作示例
-        shape = node.inputs[0].shape[node.attrs["dim"]]
-        return [output_grad / shape]
+        dims = node.attrs["dim"]  # dims 是一个 tuple
+        input_shape = node.inputs[0].attrs["shape"]  # 假设输入节点已经有 shape 信息，例如 (50, 28, 128)
+        scale = 1
+        for d in dims:
+            scale *= input_shape[d]
+        return [output_grad / scale]
 
 # Create global instances of ops.
 # Your implementation should just use these instances, rather than creating new instances.
