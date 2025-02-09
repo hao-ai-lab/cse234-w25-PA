@@ -135,6 +135,55 @@ class Op:
         raise NotImplementedError
 
 
+
+
+class UnsqueezeOp(Op):
+    def __call__(self, node_A: Node, dim: int) -> Node:
+        result_node = Node(
+            inputs=[node_A],
+            op=self,
+            attrs={"dim": dim},
+            name=f"Unsqueeze({node_A.name}, {dim})"
+        )
+        if "shape" in node_A.attrs:
+            shape = list(node_A.attrs["shape"])
+            shape.insert(dim, 1)
+            result_node.attrs["shape"] = tuple(shape)
+        return result_node
+
+    def compute(self, node: Node, input_values: List[torch.Tensor]) -> torch.Tensor:
+        assert len(input_values) == 1
+        return input_values[0].unsqueeze(node.attrs["dim"])
+
+    def gradient(self, node: Node, output_grad: Node) -> List[Node]:
+        return [squeeze(output_grad, node.attrs["dim"])]
+
+class SqueezeOp(Op):
+    """Squeeze operation: remove a singleton dimension at the given index."""
+    def __call__(self, node_A: Node, dim: int) -> Node:
+        result_node = Node(
+            inputs=[node_A],
+            op=self,
+            attrs={"dim": dim},
+            name=f"Squeeze({node_A.name}, {dim})"
+        )
+        if "shape" in node_A.attrs:
+            shape = list(node_A.attrs["shape"])
+            # 如果该维度为1则移除，否则保持不变
+            if shape[dim] == 1:
+                del shape[dim]
+            result_node.attrs["shape"] = tuple(shape)
+        return result_node
+
+    def compute(self, node: Node, input_values: List[torch.Tensor]) -> torch.Tensor:
+        assert len(input_values) == 1
+        return input_values[0].squeeze(node.attrs["dim"])
+
+    def gradient(self, node: Node, output_grad: Node) -> List[Node]:
+        # Gradient of squeeze is unsqueeze along the same dimension.
+        return [unsqueeze(output_grad, node.attrs["dim"])]
+
+
 class PlaceholderOp(Op):
     """The placeholder op to denote computational graph input nodes."""
 
@@ -522,8 +571,13 @@ class ExpandAsOp3d(Op):
         """Return the broadcasted tensor."""
         assert len(input_values) == 2
         input_tensor, target_tensor = input_values
-        print('expand_op', input_tensor.shape, target_tensor.shape)
-        return input_tensor.unsqueeze(1).expand_as(target_tensor)
+        # print('expand_op', input_tensor.shape, target_tensor.shape)
+        # 修改部分：如果 input_tensor 是 0 维的，则只能在 dim=0 处插入维度；否则在 dim=1 处插入。
+        if input_tensor.dim() == 0:
+            unsqueezed = input_tensor.unsqueeze(0)
+        else:
+            unsqueezed = input_tensor.unsqueeze(1)
+        return unsqueezed.expand_as(target_tensor)
 
     def gradient(self, node: Node, output_grad: Node) -> List[Node]:
         """Given the gradient of the broadcast node, compute partial adjoint to input."""
@@ -898,9 +952,6 @@ class PowerOp(Op):
 
 
 class MeanOp(Op):
-    """Op to compute mean along specified dimensions.
-    """
-
     def __call__(self, node_A: Node, dim: tuple, keepdim: bool = False) -> Node:
         result_node = Node(
             inputs=[node_A],
@@ -908,10 +959,8 @@ class MeanOp(Op):
             attrs={"dim": dim, "keepdim": keepdim},
             name=f"Mean({node_A.name})",
         )
-        # 自动传播：如果输入节点具有 "shape" 属性，则推断输出节点的 shape
         if "shape" in node_A.attrs:
             input_shape = node_A.attrs["shape"]
-            # 处理可能的负数索引，将它们转换为正数索引
             dims_normalized = tuple(d if d >= 0 else len(input_shape) + d for d in dim)
             if keepdim:
                 out_shape = list(input_shape)
@@ -919,7 +968,6 @@ class MeanOp(Op):
                     out_shape[d] = 1
                 result_node.attrs["shape"] = tuple(out_shape)
             else:
-                # 删除被归约的维度
                 out_shape = [s for i, s in enumerate(input_shape) if i not in dims_normalized]
                 result_node.attrs["shape"] = tuple(out_shape)
         return result_node
@@ -929,12 +977,29 @@ class MeanOp(Op):
         return torch.mean(input_values[0], dim=node.attrs["dim"], keepdim=node.attrs["keepdim"])
 
     def gradient(self, node: Node, output_grad: Node) -> List[Node]:
-        dims = node.attrs["dim"]  # dims 是一个 tuple
-        input_shape = node.inputs[0].attrs["shape"]  # 假设输入节点已经有 shape 信息，例如 (50, 28, 128)
+        """
+        对于 mean 操作：
+          forward：输入在指定维度上取均值，结果尺寸减少（如果 keepdim=False）。
+          backward：需要将 output_grad 在被 reduce 的维度上恢复为 singleton 维度，
+                     然后扩展（broadcast）到原输入的尺寸，最后除以 reduce 的元素个数。
+        """
+        dims = node.attrs["dim"]
+        input_shape = node.inputs[0].attrs["shape"]  # 原输入的 shape，比如 (50, 28, 128)
         scale = 1
         for d in dims:
             scale *= input_shape[d]
-        return [output_grad / scale]
+        expanded_grad = output_grad
+        # 在被 reduce 的每个维度上插入 singleton 维度
+        for d in sorted(dims):
+            expanded_grad = unsqueeze(expanded_grad, d)
+        # 构造 unsqueeze 后的 shape：将原始输入在被 reduce 维度上设置为 1
+        current_shape = list(input_shape)
+        for d in dims:
+            current_shape[d] = 1
+        # 使用 broadcast 将 expanded_grad 从 current_shape 扩展到原始输入的 shape
+        expanded_grad = broadcast(expanded_grad, current_shape, list(input_shape))
+        return [expanded_grad / scale]
+
 
 # Create global instances of ops.
 # Your implementation should just use these instances, rather than creating new instances.
@@ -962,6 +1027,8 @@ expand_as_3d = ExpandAsOp3d()
 log = LogOp()
 sub = SubOp()
 broadcast = BroadcastOp()
+unsqueeze = UnsqueezeOp()
+squeeze = SqueezeOp()
 
 def topological_sort(nodes):
     """Helper function to perform topological sort on nodes.
